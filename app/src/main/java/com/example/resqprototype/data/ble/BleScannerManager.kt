@@ -1,0 +1,119 @@
+package com.example.resqprototype.data.ble
+
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.content.Context
+import com.example.resqprototype.domain.model.SosAlert
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+class BleScannerManager(private val context: Context) {
+
+    private val bluetoothManager: BluetoothManager? =
+        context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+    private val bluetoothAdapter: BluetoothAdapter? = try {
+        bluetoothManager?.adapter
+    } catch (e: Exception) {
+        null
+    }
+
+    private var scanner: BluetoothLeScanner? = null
+
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
+
+    private var onAlertDiscoveredCallback: ((SosAlert) -> Unit)? = null
+
+    fun isBleScanningSupported(): Boolean {
+        if (BleConstants.isEmulator()) return false
+
+        return try {
+            bluetoothAdapter != null && bluetoothAdapter.isEnabled
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult?) {
+            result?.let { scanResult ->
+                val scanRecord = scanResult.scanRecord ?: return@let
+                val serviceData = scanRecord.getServiceData(BleConstants.RESQ_SERVICE_UUID) ?: return@let
+
+                val deviceName = try {
+                    @SuppressLint("MissingPermission")
+                    scanResult.device?.name ?: "Nearby Rescuee"
+                } catch (e: Exception) {
+                    "Nearby Rescuee"
+                }
+
+                val decodedAlert = SosPayloadCodec.decode(
+                    bytes = serviceData,
+                    defaultSenderName = deviceName
+                )
+
+                if (decodedAlert != null) {
+                    onAlertDiscoveredCallback?.invoke(decodedAlert)
+                }
+            }
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            _isScanning.value = false
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun startScanning(onAlertDiscovered: (SosAlert) -> Unit): Boolean {
+        if (!isBleScanningSupported()) {
+            _isScanning.value = true // Emulator simulation fallback
+            return false
+        }
+
+        return try {
+            scanner = bluetoothAdapter?.bluetoothLeScanner
+            if (scanner == null) {
+                _isScanning.value = true
+                return false
+            }
+
+            this.onAlertDiscoveredCallback = onAlertDiscovered
+
+            val filters = listOf(
+                ScanFilter.Builder()
+                    .setServiceUuid(BleConstants.RESQ_SERVICE_UUID)
+                    .build()
+            )
+
+            val settings = ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .build()
+
+            scanner?.startScan(filters, settings, scanCallback)
+            _isScanning.value = true
+            true
+        } catch (e: Exception) {
+            _isScanning.value = true
+            false
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun stopScanning() {
+        try {
+            if (isBleScanningSupported() && scanner != null) {
+                scanner?.stopScan(scanCallback)
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        _isScanning.value = false
+    }
+}
