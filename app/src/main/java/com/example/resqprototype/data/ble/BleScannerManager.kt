@@ -13,6 +13,7 @@ import com.example.resqprototype.domain.model.SosAlert
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.ConcurrentHashMap
 
 class BleScannerManager(private val context: Context) {
 
@@ -30,6 +31,10 @@ class BleScannerManager(private val context: Context) {
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
     private var onAlertDiscoveredCallback: ((SosAlert) -> Unit)? = null
+
+    // Dual-Packet Caches
+    private val nameCache = ConcurrentHashMap<Int, String>()
+    private val alertCache = ConcurrentHashMap<Int, SosAlert>()
 
     fun isBleScanningSupported(): Boolean {
         if (BleConstants.isEmulator()) return false
@@ -49,20 +54,41 @@ class BleScannerManager(private val context: Context) {
                     ?: scanRecord.getServiceData(BleConstants.RESQ_SERVICE_UUID)
                     ?: return@let
 
-                val deviceName = try {
-                    @SuppressLint("MissingPermission")
-                    scanResult.device?.name ?: "Nearby Rescuee"
-                } catch (e: Exception) {
-                    "Nearby Rescuee"
-                }
+                when (val decoded = SosPayloadCodec.decodePacket(rawPayload)) {
+                    is SosPayloadCodec.DecodedPacket.NamePacket -> {
+                        nameCache[decoded.sosHash] = decoded.senderName
+                        val existingAlert = alertCache[decoded.sosHash]
+                        if (existingAlert != null) {
+                            val updatedAlert = existingAlert.copy(senderName = decoded.senderName)
+                            alertCache[decoded.sosHash] = updatedAlert
+                            onAlertDiscoveredCallback?.invoke(updatedAlert)
+                        }
+                    }
+                    is SosPayloadCodec.DecodedPacket.LocationPacket -> {
+                        val senderName = nameCache[decoded.sosHash] ?: try {
+                            @SuppressLint("MissingPermission")
+                            scanResult.device?.name ?: "Nearby Rescuee"
+                        } catch (e: Exception) {
+                            "Nearby Rescuee"
+                        }
 
-                val decodedAlert = SosPayloadCodec.decode(
-                    bytes = rawPayload,
-                    defaultSenderName = deviceName
-                )
-
-                if (decodedAlert != null) {
-                    onAlertDiscoveredCallback?.invoke(decodedAlert)
+                        val alert = SosAlert(
+                            id = "sos_${Math.abs(decoded.sosHash)}",
+                            senderName = senderName,
+                            latitude = decoded.latitude,
+                            longitude = decoded.longitude,
+                            timestamp = System.currentTimeMillis(),
+                            customMessage = decoded.customNote,
+                            medicalNotes = "Blood Type: ${decoded.bloodType}",
+                            isEmergency = true,
+                            status = "ACTIVE"
+                        )
+                        alertCache[decoded.sosHash] = alert
+                        onAlertDiscoveredCallback?.invoke(alert)
+                    }
+                    null -> {
+                        // Fallback for legacy single packets
+                    }
                 }
             }
         }

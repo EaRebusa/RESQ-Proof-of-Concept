@@ -6,89 +6,109 @@ import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 
 /**
- * Encodes and decodes SOS alert payloads into a compact 22-byte binary packet.
- * Guaranteed to fit inside standard BLE legacy advertising data limits (31 bytes max).
+ * Dual-Packet Binary Serializer for RESQ.
+ * Packet A (21B) = Full Sender Name (Up to 15 characters).
+ * Packet B (21B) = GPS Lat/Lng + Blood Type + Custom Emergency Note.
+ *
+ * Both packets stay strictly at 21 bytes (28 bytes total on air <= 31 byte BLE limit).
  */
 object SosPayloadCodec {
 
-    const val MAGIC_BYTE: Byte = 0x52 // ASCII 'R' for RESQ
-    const val NAME_BYTES_SIZE = 5
-    const val PACKET_SIZE = 22 // 17 bytes core + 5 bytes name = 22 bytes total (3B Flags + 4B Header + 22B = 29B <= 31B!)
+    const val MAGIC_BYTE: Byte = 0x52 // ASCII 'R'
+    const val PACKET_TYPE_A: Byte = 0x01 // Name Packet
+    const val PACKET_TYPE_B: Byte = 0x02 // Location & Emergency Note Packet
 
-    /**
-     * Serializes a [SosAlert] into a 22-byte array.
-     */
-    fun encode(alert: SosAlert, batteryLevel: Int = 100): ByteArray {
+    const val NAME_BYTES_SIZE = 15
+    const val NOTE_BYTES_SIZE = 6
+    const val PACKET_SIZE = 21
+
+    private val bloodTypeMap = listOf("O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-")
+
+    fun encodePacketA(alert: SosAlert): ByteArray {
         val buffer = ByteBuffer.allocate(PACKET_SIZE).order(ByteOrder.BIG_ENDIAN)
+        buffer.put(MAGIC_BYTE) // 1B
+        buffer.putInt(alert.id.hashCode()) // 4B
+        buffer.put(PACKET_TYPE_A) // 1B
 
-        buffer.put(MAGIC_BYTE) // 1 byte
-        buffer.putInt(alert.id.hashCode()) // 4 bytes
-        buffer.putFloat(alert.latitude.toFloat()) // 4 bytes
-        buffer.putFloat(alert.longitude.toFloat()) // 4 bytes
-
-        var flags: Byte = 0
-        if (alert.isEmergency) flags = (flags.toInt() or 0x01).toByte()
-        if (alert.medicalNotes.isNotEmpty()) flags = (flags.toInt() or 0x02).toByte()
-        buffer.put(flags) // 1 byte
-
-        val sequence = ((alert.timestamp / 1000) % 65535).toShort()
-        buffer.putShort(sequence) // 2 bytes
-        buffer.put(batteryLevel.coerceIn(0, 100).toByte()) // 1 byte
-
-        // Encode sender short name/initials into fixed 5-byte buffer
         val nameBytes = alert.senderName.toByteArray(StandardCharsets.UTF_8)
-        val fixedNameBytes = ByteArray(NAME_BYTES_SIZE)
+        val fixedBytes = ByteArray(NAME_BYTES_SIZE)
         val bytesToCopy = Math.min(nameBytes.size, NAME_BYTES_SIZE)
-        System.arraycopy(nameBytes, 0, fixedNameBytes, 0, bytesToCopy)
-        buffer.put(fixedNameBytes) // 5 bytes
+        System.arraycopy(nameBytes, 0, fixedBytes, 0, bytesToCopy)
+        buffer.put(fixedBytes) // 15B
 
         return buffer.array()
     }
 
-    /**
-     * Deserializes a 22-byte binary array back into a [SosAlert].
-     */
-    fun decode(bytes: ByteArray, defaultSenderName: String = "Nearby Rescuee"): SosAlert? {
-        if (bytes.size < 17) return null // Must at least contain 17 core bytes
+    fun encodePacketB(alert: SosAlert): ByteArray {
+        val buffer = ByteBuffer.allocate(PACKET_SIZE).order(ByteOrder.BIG_ENDIAN)
+        buffer.put(MAGIC_BYTE) // 1B
+        buffer.putInt(alert.id.hashCode()) // 4B
+        buffer.put(PACKET_TYPE_B) // 1B
+
+        buffer.putFloat(alert.latitude.toFloat()) // 4B
+        buffer.putFloat(alert.longitude.toFloat()) // 4B
+
+        val bloodIndex = bloodTypeMap.indexOfFirst {
+            alert.medicalNotes.contains(it, ignoreCase = true)
+        }.coerceAtLeast(0).toByte()
+        buffer.put(bloodIndex) // 1B
+
+        val noteBytes = alert.customMessage.toByteArray(StandardCharsets.UTF_8)
+        val fixedNoteBytes = ByteArray(NOTE_BYTES_SIZE)
+        val bytesToCopy = Math.min(noteBytes.size, NOTE_BYTES_SIZE)
+        System.arraycopy(noteBytes, 0, fixedNoteBytes, 0, bytesToCopy)
+        buffer.put(fixedNoteBytes) // 6B
+
+        return buffer.array()
+    }
+
+    sealed class DecodedPacket {
+        data class NamePacket(val sosHash: Int, val senderName: String) : DecodedPacket()
+        data class LocationPacket(
+            val sosHash: Int,
+            val latitude: Double,
+            val longitude: Double,
+            val bloodType: String,
+            val customNote: String
+        ) : DecodedPacket()
+    }
+
+    fun decodePacket(bytes: ByteArray): DecodedPacket? {
+        if (bytes.size < 6) return null
 
         val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN)
         val magic = buffer.get()
         if (magic != MAGIC_BYTE) return null
 
         val sosHash = buffer.int
-        val latitude = buffer.float.toDouble()
-        val longitude = buffer.float.toDouble()
-        val flags = buffer.get().toInt()
-        val sequence = buffer.short
-        val battery = buffer.get().toInt()
+        val packetType = buffer.get()
 
-        val isEmergency = (flags and 0x01) != 0
-        val hasMedicalNote = (flags and 0x02) != 0
-
-        var extractedName = defaultSenderName
-        if (bytes.size >= PACKET_SIZE) {
-            val nameBuffer = ByteArray(NAME_BYTES_SIZE)
-            buffer.get(nameBuffer)
-            val nullIndex = nameBuffer.indexOf(0)
-            val endLen = if (nullIndex >= 0) nullIndex else NAME_BYTES_SIZE
-            if (endLen > 0) {
+        return when (packetType) {
+            PACKET_TYPE_A -> {
+                if (bytes.size < PACKET_SIZE) return null
+                val nameBuffer = ByteArray(NAME_BYTES_SIZE)
+                buffer.get(nameBuffer)
+                val nullIndex = nameBuffer.indexOf(0)
+                val endLen = if (nullIndex >= 0) nullIndex else NAME_BYTES_SIZE
                 val decodedName = String(nameBuffer, 0, endLen, StandardCharsets.UTF_8).trim()
-                if (decodedName.isNotEmpty()) {
-                    extractedName = decodedName
-                }
+                DecodedPacket.NamePacket(sosHash, decodedName.ifEmpty { "Nearby Rescuee" })
             }
-        }
+            PACKET_TYPE_B -> {
+                if (bytes.size < PACKET_SIZE) return null
+                val lat = buffer.float.toDouble()
+                val lng = buffer.float.toDouble()
+                val bloodIdx = buffer.get().toInt().coerceIn(0, bloodTypeMap.lastIndex)
+                val bloodType = bloodTypeMap[bloodIdx]
 
-        return SosAlert(
-            id = "sos_${Math.abs(sosHash)}",
-            senderName = extractedName,
-            latitude = latitude,
-            longitude = longitude,
-            timestamp = System.currentTimeMillis(),
-            customMessage = "Over-the-Air BLE Signal (Battery: $battery%)",
-            medicalNotes = if (hasMedicalNote) "Medical Alert Active" else "",
-            isEmergency = isEmergency,
-            status = "ACTIVE"
-        )
+                val noteBuffer = ByteArray(NOTE_BYTES_SIZE)
+                buffer.get(noteBuffer)
+                val nullIndex = noteBuffer.indexOf(0)
+                val endLen = if (nullIndex >= 0) nullIndex else NOTE_BYTES_SIZE
+                val decodedNote = String(noteBuffer, 0, endLen, StandardCharsets.UTF_8).trim()
+
+                DecodedPacket.LocationPacket(sosHash, lat, lng, bloodType, decodedNote)
+            }
+            else -> null
+        }
     }
 }

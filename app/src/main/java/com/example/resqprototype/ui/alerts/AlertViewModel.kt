@@ -8,7 +8,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.resqprototype.data.ble.BleScannerManager
-import com.example.resqprototype.data.ble.SosPayloadCodec
 import com.example.resqprototype.data.db.ResqDatabase
 import com.example.resqprototype.data.location.LocationManager
 import com.example.resqprototype.data.preferences.UserPreferencesRepository
@@ -97,24 +96,10 @@ class AlertViewModel(application: Application) : AndroidViewModel(application) {
                 latitude = 7.0700 + (Math.random() * 0.015 - 0.0075),
                 longitude = 125.6000 + (Math.random() * 0.015 - 0.0075),
                 customMessage = note,
-                medicalNotes = "Medical Flag: Active",
+                medicalNotes = "Blood Type: O+",
                 status = "ACTIVE"
             )
-
-            // Test 29-byte binary payload serialization / deserialization
-            val encodedBytes = SosPayloadCodec.encode(rawAlert, batteryLevel = 88)
-            val decodedAlert = SosPayloadCodec.decode(encodedBytes, defaultSenderName = name)
-
-            if (decodedAlert != null) {
-                val finalAlert = decodedAlert.copy(
-                    customMessage = note,
-                    medicalNotes = "Blood Type: O+",
-                    status = "ACTIVE"
-                )
-                repository.saveAlert(finalAlert)
-            } else {
-                repository.saveAlert(rawAlert)
-            }
+            repository.saveAlert(rawAlert)
         }
     }
 

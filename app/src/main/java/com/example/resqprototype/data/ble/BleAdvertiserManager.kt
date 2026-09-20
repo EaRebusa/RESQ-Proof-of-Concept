@@ -11,9 +11,14 @@ import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
 import com.example.resqprototype.domain.model.SosAlert
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 object BleConstants {
@@ -44,6 +49,8 @@ class BleAdvertiserManager(private val context: Context) {
     }
 
     private var advertiser: BluetoothLeAdvertiser? = null
+    private var advertiseJob: Job? = null
+    private val scope = CoroutineScope(Dispatchers.IO)
 
     private val _isAdvertising = MutableStateFlow(false)
     val isAdvertising: StateFlow<Boolean> = _isAdvertising.asStateFlow()
@@ -73,18 +80,22 @@ class BleAdvertiserManager(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun startAdvertising(alert: SosAlert, batteryLevel: Int = 100): Boolean {
         if (!isBleAdvertisingSupported()) {
-            _isAdvertising.value = true // Safe simulation mode fallback for emulator
+            _isAdvertising.value = true // Safe simulation mode fallback
             return false
         }
 
-        return try {
-            advertiser = bluetoothAdapter?.bluetoothLeAdvertiser
-            if (advertiser == null) {
-                _isAdvertising.value = true
-                return false
-            }
+        advertiser = bluetoothAdapter?.bluetoothLeAdvertiser
+        if (advertiser == null) {
+            _isAdvertising.value = true
+            return false
+        }
 
-            val payload = SosPayloadCodec.encode(alert, batteryLevel)
+        _isAdvertising.value = true
+        advertiseJob?.cancel()
+
+        advertiseJob = scope.launch {
+            val payloadA = SosPayloadCodec.encodePacketA(alert)
+            val payloadB = SosPayloadCodec.encodePacketB(alert)
 
             val settings = AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
@@ -92,23 +103,32 @@ class BleAdvertiserManager(private val context: Context) {
                 .setConnectable(true)
                 .build()
 
-            // Compact 21-byte advertising data fits inside 31-byte legacy limit
-            val data = AdvertiseData.Builder()
-                .setIncludeDeviceName(false)
-                .setIncludeTxPowerLevel(false)
-                .addManufacturerData(BleConstants.RESQ_MANUFACTURER_ID, payload)
-                .build()
+            var toggle = false
+            while (_isAdvertising.value) {
+                try {
+                    advertiser?.stopAdvertising(advertiseCallback)
+                    val activePayload = if (toggle) payloadA else payloadB
+                    toggle = !toggle
 
-            advertiser?.startAdvertising(settings, data, advertiseCallback)
-            true
-        } catch (e: Exception) {
-            _isAdvertising.value = true
-            false
+                    val data = AdvertiseData.Builder()
+                        .setIncludeDeviceName(false)
+                        .setIncludeTxPowerLevel(false)
+                        .addManufacturerData(BleConstants.RESQ_MANUFACTURER_ID, activePayload)
+                        .build()
+
+                    advertiser?.startAdvertising(settings, data, advertiseCallback)
+                } catch (e: Exception) {
+                    // Safe catch
+                }
+                delay(500) // Alternate Packet A and Packet B every 500ms
+            }
         }
+        return true
     }
 
     @SuppressLint("MissingPermission")
     fun stopAdvertising() {
+        advertiseJob?.cancel()
         try {
             if (isBleAdvertisingSupported() && advertiser != null) {
                 advertiser?.stopAdvertising(advertiseCallback)
