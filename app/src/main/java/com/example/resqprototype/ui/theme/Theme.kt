@@ -19,8 +19,11 @@ private val DarkColorScheme = darkColorScheme(
     secondary = CautionAmber,
     tertiary = SafetyGreen,
     background = DarkBackground,
+    onBackground = Color(0xFFE6E1E5),
     surface = DarkSurface,
-    surfaceVariant = DarkSurfaceVariant
+    onSurface = Color(0xFFE6E1E5),
+    surfaceVariant = DarkSurfaceVariant,
+    onSurfaceVariant = Color(0xFFCAC4D0)
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -31,22 +34,31 @@ private val LightColorScheme = lightColorScheme(
     secondary = CautionAmber,
     tertiary = SafetyGreen,
     background = Color(0xFFFCFCFF),
+    onBackground = Color(0xFF1C1B1F),
     surface = Color(0xFFFCFCFF),
-    surfaceVariant = Color(0xFFF0F0F5)
+    onSurface = Color(0xFF1C1B1F),
+    surfaceVariant = Color(0xFFF0F0F5),
+    onSurfaceVariant = Color(0xFF49454F)
 )
 
 @Composable
 fun RESQPrototypeTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Set false to prioritize brand emergency red
+    themeMode: String = "SYSTEM", // "SYSTEM", "LIGHT", "DARK"
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
+    val isDark = when (themeMode) {
+        "LIGHT" -> false
+        "DARK" -> true
+        else -> isSystemInDarkTheme()
+    }
+
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        darkTheme -> DarkColorScheme
+        isDark -> DarkColorScheme
         else -> LightColorScheme
     }
 

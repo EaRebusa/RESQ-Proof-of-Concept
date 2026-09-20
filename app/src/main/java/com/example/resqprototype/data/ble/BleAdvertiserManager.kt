@@ -18,6 +18,7 @@ import java.util.UUID
 
 object BleConstants {
     val RESQ_SERVICE_UUID: ParcelUuid = ParcelUuid(UUID.fromString("0000FE50-0000-1000-8000-00805F9B34FB"))
+    const val RESQ_MANUFACTURER_ID = 0x00E0 // Compact 2-byte Manufacturer ID
 
     fun isEmulator(): Boolean {
         return (Build.FINGERPRINT.startsWith("generic")
@@ -91,11 +92,11 @@ class BleAdvertiserManager(private val context: Context) {
                 .setConnectable(true)
                 .build()
 
+            // Compact 21-byte advertising data fits inside 31-byte legacy limit
             val data = AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
                 .setIncludeTxPowerLevel(false)
-                .addServiceUuid(BleConstants.RESQ_SERVICE_UUID)
-                .addServiceData(BleConstants.RESQ_SERVICE_UUID, payload)
+                .addManufacturerData(BleConstants.RESQ_MANUFACTURER_ID, payload)
                 .build()
 
             advertiser?.startAdvertising(settings, data, advertiseCallback)

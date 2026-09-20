@@ -1,5 +1,8 @@
 package com.example.resqprototype.ui.home
 
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.content.Intent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -7,6 +10,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,16 +31,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.MedicalServices
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -52,11 +62,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.resqprototype.R
 import com.example.resqprototype.domain.model.UserProfile
 import com.example.resqprototype.ui.theme.CautionAmber
 import com.example.resqprototype.ui.theme.EmergencyRed
@@ -64,19 +77,23 @@ import com.example.resqprototype.ui.theme.EmergencyRedDark
 import com.example.resqprototype.ui.theme.SafetyGreen
 import java.util.Locale
 
+@SuppressLint("MissingPermission")
 @Composable
 fun HomeScreen(
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = viewModel(),
     onSosTriggered: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val isBroadcasting by viewModel.isBroadcasting.collectAsState()
     val userProfile by viewModel.userProfile.collectAsState()
     val customNote by viewModel.customNote.collectAsState()
     val currentLocation by viewModel.currentLocation.collectAsState()
+    val themeMode by viewModel.themeMode.collectAsState()
     val isHardwareBleSupported = viewModel.isHardwareBleSupported
 
     var showEditProfileDialog by remember { mutableStateOf(false) }
+    var showThemeMenu by remember { mutableStateOf(false) }
 
     val buttonBgColor by animateColorAsState(
         targetValue = if (isBroadcasting) EmergencyRed else EmergencyRedDark,
@@ -110,35 +127,85 @@ fun HomeScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .padding(16.dp)
+            .imePadding()
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
     ) {
-        // App Header
+        // App Header with Custom Logo & Theme Toggle
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(top = 12.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.Default.Shield,
-                contentDescription = "RESQ Logo",
-                tint = EmergencyRed,
-                modifier = Modifier.size(32.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "RESQ Sender Mode",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_resq_logo),
+                    contentDescription = "RESQ Logo",
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "RESQ Sender Mode",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Off-Grid Bluetooth LE Transmitter",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
 
-        Text(
-            text = "Off-Grid Bluetooth LE Emergency Transmitter",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+            // Theme Switcher Button
+            Box {
+                IconButton(onClick = { showThemeMenu = true }) {
+                    Icon(
+                        imageVector = when (themeMode) {
+                            "LIGHT" -> Icons.Default.LightMode
+                            "DARK" -> Icons.Default.DarkMode
+                            else -> Icons.Default.SettingsSuggest
+                        },
+                        contentDescription = "Theme Mode",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showThemeMenu,
+                    onDismissRequest = { showThemeMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("☀️ Light Mode") },
+                        onClick = {
+                            viewModel.updateThemeMode("LIGHT")
+                            showThemeMenu = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("🌙 Dark Mode") },
+                        onClick = {
+                            viewModel.updateThemeMode("DARK")
+                            showThemeMenu = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("⚙️ System Default") },
+                        onClick = {
+                            viewModel.updateThemeMode("SYSTEM")
+                            showThemeMenu = false
+                        }
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(36.dp))
 
@@ -172,6 +239,19 @@ fun HomeScreen(
                         shape = CircleShape
                     )
                     .clickable {
+                        // Prompt system Bluetooth enable intent if Bluetooth is OFF on physical device
+                        try {
+                            val btAdapter = BluetoothAdapter.getDefaultAdapter()
+                            if (btAdapter != null && !btAdapter.isEnabled) {
+                                val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                }
+                                context.startActivity(enableBtIntent)
+                            }
+                        } catch (e: Exception) {
+                            // Safe catch for permissions
+                        }
+
                         viewModel.toggleSosBroadcast()
                         if (!isBroadcasting) {
                             onSosTriggered()
@@ -201,11 +281,12 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(28.dp))
 
-        // Live Status Banner Card
+        // Live Status Banner Card (High-Contrast for Light & Dark Modes)
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
-                containerColor = if (isBroadcasting) Color(0xFFFFEBEE) else MaterialTheme.colorScheme.surfaceVariant
+                containerColor = if (isBroadcasting) Color(0xFFFFEBEE) else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (isBroadcasting) Color(0xFFC62828) else MaterialTheme.colorScheme.onSurfaceVariant
             ),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -238,7 +319,7 @@ fun HomeScreen(
                             "🛠️ SIMULATION FALLBACK (EMULATOR)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
-                        color = if (isHardwareBleSupported) SafetyGreen else CautionAmber
+                        color = if (isHardwareBleSupported) Color(0xFF1B5E20) else Color(0xFFE65100)
                     )
                 }
 
@@ -249,10 +330,11 @@ fun HomeScreen(
 
                 Text(
                     text = if (isBroadcasting)
-                        "17-Byte radio beacon transmitting (GPS: $formattedLat, $formattedLng)."
+                        "22-Byte radio beacon transmitting (GPS: $formattedLat, $formattedLng)."
                     else
                         "Live GPS: $formattedLat, $formattedLng • Press red button in emergency.",
                     style = MaterialTheme.typography.bodySmall,
+                    color = if (isBroadcasting) Color(0xFFB71C1C) else MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
             }

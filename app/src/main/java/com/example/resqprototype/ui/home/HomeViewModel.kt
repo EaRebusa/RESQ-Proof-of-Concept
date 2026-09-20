@@ -28,6 +28,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _customNote = MutableStateFlow("")
     val customNote: StateFlow<String> = _customNote.asStateFlow()
 
+    private val _themeMode = MutableStateFlow("SYSTEM")
+    val themeMode: StateFlow<String> = _themeMode.asStateFlow()
+
     private val _isBroadcasting = MutableStateFlow(false)
     val isBroadcasting: StateFlow<Boolean> = _isBroadcasting.asStateFlow()
 
@@ -51,6 +54,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        viewModelScope.launch {
+            prefsRepository.themeModeFlow.collect { mode ->
+                _themeMode.value = mode
+            }
+        }
+
         locationManager.requestCurrentLocation()
     }
 
@@ -65,6 +74,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _userProfile.value = newProfile
         viewModelScope.launch {
             prefsRepository.saveUserProfile(newProfile)
+        }
+    }
+
+    fun updateThemeMode(mode: String) {
+        _themeMode.value = mode
+        viewModelScope.launch {
+            prefsRepository.saveThemeMode(mode)
         }
     }
 

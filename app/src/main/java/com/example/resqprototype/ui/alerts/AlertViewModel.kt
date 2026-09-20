@@ -2,6 +2,7 @@ package com.example.resqprototype.ui.alerts
 
 import android.app.Application
 import android.content.Intent
+import android.location.Location
 import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -9,32 +10,38 @@ import androidx.lifecycle.viewModelScope
 import com.example.resqprototype.data.ble.BleScannerManager
 import com.example.resqprototype.data.ble.SosPayloadCodec
 import com.example.resqprototype.data.db.ResqDatabase
+import com.example.resqprototype.data.location.LocationManager
+import com.example.resqprototype.data.preferences.UserPreferencesRepository
 import com.example.resqprototype.data.repository.SosRepository
 import com.example.resqprototype.domain.model.SosAlert
 import com.example.resqprototype.service.SosBleScannerService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class AlertViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = SosRepository(ResqDatabase.getInstance(application).sosAlertDao())
+    private val prefsRepository = UserPreferencesRepository(application)
     private val scannerManager = BleScannerManager(application)
+    private val locationManager = LocationManager(application)
 
     private val _alerts = MutableStateFlow<List<SosAlert>>(emptyList())
     val alerts: StateFlow<List<SosAlert>> = _alerts.asStateFlow()
 
+    val rescuerLocation: StateFlow<Location> = locationManager.currentLocation
+
     val isHardwareBleScannerSupported: Boolean
         get() = scannerManager.isBleScanningSupported()
-
-    private var hasSeededDefaultAlerts = false
 
     init {
         viewModelScope.launch {
             repository.allAlerts.collect { alertList ->
-                if (alertList.isEmpty() && !hasSeededDefaultAlerts) {
-                    hasSeededDefaultAlerts = true
+                val isSeeded = prefsRepository.isDatabaseSeededFlow.first()
+                if (alertList.isEmpty() && !isSeeded) {
+                    prefsRepository.setDatabaseSeeded(true)
                     seedDefaultAlerts()
                 } else {
                     _alerts.value = alertList
@@ -42,6 +49,7 @@ class AlertViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        locationManager.requestCurrentLocation()
         startBleForegroundScanner()
     }
 
@@ -54,7 +62,7 @@ class AlertViewModel(application: Application) : AndroidViewModel(application) {
                 getApplication<Application>().startService(intent)
             }
         } catch (e: Exception) {
-            // Safe fallback on emulator if foreground service permissions are restricted
+            // Safe fallback on emulator
         }
     }
 
@@ -93,7 +101,7 @@ class AlertViewModel(application: Application) : AndroidViewModel(application) {
                 status = "ACTIVE"
             )
 
-            // Test 17-byte binary payload serialization / deserialization
+            // Test 29-byte binary payload serialization / deserialization
             val encodedBytes = SosPayloadCodec.encode(rawAlert, batteryLevel = 88)
             val decodedAlert = SosPayloadCodec.decode(encodedBytes, defaultSenderName = name)
 

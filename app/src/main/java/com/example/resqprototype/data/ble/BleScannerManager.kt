@@ -45,7 +45,9 @@ class BleScannerManager(private val context: Context) {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             result?.let { scanResult ->
                 val scanRecord = scanResult.scanRecord ?: return@let
-                val serviceData = scanRecord.getServiceData(BleConstants.RESQ_SERVICE_UUID) ?: return@let
+                val rawPayload = scanRecord.getManufacturerSpecificData(BleConstants.RESQ_MANUFACTURER_ID)
+                    ?: scanRecord.getServiceData(BleConstants.RESQ_SERVICE_UUID)
+                    ?: return@let
 
                 val deviceName = try {
                     @SuppressLint("MissingPermission")
@@ -55,7 +57,7 @@ class BleScannerManager(private val context: Context) {
                 }
 
                 val decodedAlert = SosPayloadCodec.decode(
-                    bytes = serviceData,
+                    bytes = rawPayload,
                     defaultSenderName = deviceName
                 )
 
@@ -88,7 +90,7 @@ class BleScannerManager(private val context: Context) {
 
             val filters = listOf(
                 ScanFilter.Builder()
-                    .setServiceUuid(BleConstants.RESQ_SERVICE_UUID)
+                    .setManufacturerData(BleConstants.RESQ_MANUFACTURER_ID, byteArrayOf())
                     .build()
             )
 

@@ -1,5 +1,6 @@
 package com.example.resqprototype.ui.alerts
 
+import android.location.Location
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,8 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAlert
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MedicalServices
@@ -69,6 +70,7 @@ fun AlertListScreen(
     onViewMapClicked: (SosAlert) -> Unit = {}
 ) {
     val alerts by viewModel.alerts.collectAsState()
+    val rescuerLocation by viewModel.rescuerLocation.collectAsState()
     val isHardwareBleScannerSupported = viewModel.isHardwareBleScannerSupported
     var selectedAlert by remember { mutableStateOf<SosAlert?>(null) }
 
@@ -121,24 +123,26 @@ fun AlertListScreen(
             }
 
             Column(horizontalAlignment = Alignment.End) {
-                // Simulate incoming SOS button
-                Button(
-                    onClick = {
-                        viewModel.addMockAlert(
-                            name = "Distress Citizen ${alerts.size + 1}",
-                            note = "Urgent: Trapped near Matina Bridge area."
+                // Simulate incoming SOS button (only shown on PC emulators)
+                if (!isHardwareBleScannerSupported) {
+                    Button(
+                        onClick = {
+                            viewModel.addMockAlert(
+                                name = "Distress Citizen ${alerts.size + 1}",
+                                note = "Urgent: Trapped near Matina Bridge area."
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = EmergencyRed),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AddAlert,
+                            contentDescription = "Add Mock Alert",
+                            modifier = Modifier.size(16.dp)
                         )
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = EmergencyRed),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AddAlert,
-                        contentDescription = "Add Mock Alert",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Simulate SOS", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Simulate SOS", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
 
                 if (alerts.isNotEmpty()) {
@@ -187,6 +191,7 @@ fun AlertListScreen(
                 items(alerts, key = { it.id }) { alert ->
                     AlertCard(
                         alert = alert,
+                        rescuerLocation = rescuerLocation,
                         onCardClicked = { selectedAlert = alert },
                         onViewMapClicked = { onViewMapClicked(alert) },
                         onMarkResolved = { viewModel.markAlertResolved(alert.id) },
@@ -257,6 +262,7 @@ fun AlertListScreen(
 @Composable
 fun AlertCard(
     alert: SosAlert,
+    rescuerLocation: Location,
     onCardClicked: () -> Unit,
     onViewMapClicked: () -> Unit,
     onMarkResolved: () -> Unit,
@@ -352,7 +358,7 @@ fun AlertCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Proximity & Location Badge Row
+            // Proximity & Location Badge Row (Dynamic Live Location Calculation!)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Default.LocationOn,
@@ -362,11 +368,12 @@ fun AlertCard(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 val distMeters = DistanceCalculator.calculateDistanceMeters(
-                    7.0736, 125.6110, alert.latitude, alert.longitude
+                    rescuerLocation.latitude, rescuerLocation.longitude,
+                    alert.latitude, alert.longitude
                 )
                 val formattedDist = DistanceCalculator.formatDistance(distMeters)
                 Text(
-                    text = "Davao City (${String.format(Locale.US, "%.4f", alert.latitude)}, ${String.format(Locale.US, "%.4f", alert.longitude)}) • $formattedDist away",
+                    text = "GPS: ${String.format(Locale.US, "%.4f", alert.latitude)}, ${String.format(Locale.US, "%.4f", alert.longitude)} • $formattedDist away",
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold
                 )
